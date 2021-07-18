@@ -36,7 +36,7 @@ def get_spectrograms(fpath):
 	)
 
 	# Magnitude spectrogram.
-	mag = np.abs(linear) # (1 + n_fft // 2, !)
+	mag = np.abs(linear) # (1 + n_fft // 2, T)
 
 	# Mel spectrogram.
 	mel_basis = librosa.filters.mel(hp.sr, hp.n_fft, hp.n_mels) # (n_mels, 1 + n_fft // 2)
@@ -150,7 +150,7 @@ def load_spectrograms(fpath):
 	# Marginal padding for reduction shape sync.
 	num_paddings = hp.r - (t % hp.r) if t % hp.r != 0 else 0
 	mel = np.pad(mel, [[0, num_paddings], [0, 0]], mode="constant")
-	mag = np.pad(mel, [[0, num_paddings], [0, 0]], mode="constant")
+	mag = np.pad(mag, [[0, num_paddings], [0, 0]], mode="constant")
 
 	# Reduction.
 	mel = mel[::hp.r, :]

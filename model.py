@@ -279,40 +279,50 @@ class Text2Mel(Model):
 
 
 class GraphModel:
-	def __init__(self):
+	def __init__(self, input_hp=None):
 		# Load vocabulary.
 		self.char2idx, self.idx2char = load_vocab()
 
+		# Hyperparameters.
+		self.hp = hp if input_hp is None else input_hp
+
+		# Guided attention step.
+		self.gts = tf.convert_to_tensor(guided_attention())
+
 		# Model layers.
-		self.textEnc = TextEncoder(hp)
-		self.audioEnc = AudioEncoder(hp)
-		self.attention = Attention(hp)
-		self.audioDec = AudioDecoder(hp)
-		self.ssrn = SSRN(hp)
+		self.textEnc = TextEncoder(self.hp)
+		self.audioEnc = AudioEncoder(self.hp)
+		self.attention = Attention(self.hp)
+		self.audioDec = AudioDecoder(self.hp)
+		self.ssrn = SSRN(self.hp)
 
 		# Instantiate models.
 		self.create_model()
 
 
+
 	def create_model(self):
 		# Initialize all model inputs.
 		text = tf.keras.Input(shape=(None,), dtype=tf.int32,
-			batch_size=hp.B
+			batch_size=self.hp.B
 		) # (N)
 		mels = tf.keras.Input(shape=(None, 80), dtype=tf.float32,
-			batch_size=hp.B
+			batch_size=self.hp.B
 		) # (T/r, n_mels)
-		self.prev_max_attention = tf.zeros(shape=(hp.B,), dtype=tf.int32)
+		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
 		s = tf.keras.Input(shape=(None, 80), dtype=tf.float32, 
-			batch_size=hp.B
+			batch_size=self.hp.B
 		) # same shape as mel
 		
 		# Model layers.
-		self.textEnc = TextEncoder(hp)
-		self.audioEnc = AudioEncoder(hp)
-		self.attention = Attention(hp)
-		self.audioDec = AudioDecoder(hp)
-		self.ssrn = SSRN(hp)
+		self.textEnc = TextEncoder(self.hp)
+		self.audioEnc = AudioEncoder(self.hp)
+		self.attention = Attention(self.hp)
+		self.audioDec = AudioDecoder(self.hp)
+		self.ssrn = SSRN(self.hp)
+
+		# Optimizer.
+		optimizer = tf.keras.optimizers.Adam(learning_rate=self.hp.lr)
 		
 		# Create and compile Text2Mel model.
 		k, v = self.textEnc(text, training=False)
@@ -325,13 +335,15 @@ class GraphModel:
 			inputs=[text, s], 
 			outputs=[y_logits, y, alignments, max_attentions], name="text2mel"
 		)
-		self.text2mel_model.compile(optimizer="adam", loss=self.text2mel_loss)
+		self.text2mel_model.compile(optimizer=optimizer, loss=self.text2mel_loss)
 		self.text2mel_model.summary()
 
 		# Create and compile SSRN model.
 		z_logits, z = self.ssrn(mels, training=False)
-		self.ssrn_model = tf.keras.Model(inputs=[mels], outputs=[z_logits, z], name="ssrn")
-		self.ssrn_model.compile(optimizer="adam", loss=self.ssrn_loss)
+		self.ssrn_model = tf.keras.Model(inputs=[mels], outputs=[z_logits, z], 
+			name="ssrn"
+		)
+		self.ssrn_model.compile(optimizer=optimizer, loss=self.ssrn_loss)
 		self.ssrn_model.summary()
 
 
@@ -348,9 +360,9 @@ class GraphModel:
 		ssrn_folder = path_to_model_folder + "/ssrn_model"
 		
 		text2mel_hparams_file = text2mel_folder +"/hparams.json"
-		ssrn_hparams_file = ssrn_folder "/hparams.json"
+		ssrn_hparams_file = ssrn_folder + "/hparams.json"
 		text2mel_model_file = text2mel_folder + "/model.h5"
-		ssrn_model_file = ssrn_folder "/model.h5"
+		ssrn_model_file = ssrn_folder + "/model.h5"
 		if not os.path.exists(path_to_model_folder):
 			print("Error: Path to folder does not exist.")
 			return
@@ -369,20 +381,24 @@ class GraphModel:
 
 		# Load the hyperparameters and model from file.
 		'''
-		with open(hparams_file, "r") as json_file:
+		with open(text2mel_hparams_file, "r") as json_file:
 			hparams = json.load(json_file)
-		self.n_heads = hparams["n_heads"]
-		self.n_layers = hparams["n_layers"]
-		self.vocab_size = hparams["vocab_size"]
-		self.embedding_size = hparams["embedding_size"]
-		self.ff_dim = hparams["ff_dim"]
-		self.dropout_rate = hparams["dropout_rate"]
+		self.hp = hparams["hp"]
 		self.optimizer = "adam" if hparams["optimizer"] == "" else hparams["optimizer"]
 		self.loss = "sparse_categorical_crossentropy" if hparams["loss"] == "" else hparams["loss"]
 		self.metrics = "accuracy" if hparams["metrics"] == "" else hparams["accuracy"]
-		self.gpt_model = load_model(h5_model_file, 
-									custom_objects={"TokenAndPositionEmbedding": TokenAndPositionEmbedding,
-													"DecoderBlock": DecoderBlock})
+		self.text2mel_model = load_model(text2mel_model_file, 
+			custom_objects={
+				"TextEncoder": TextEncoder,
+				"AudioEncoder": AudioEncoder, 
+				"Attention": Attention,
+				"AudioDecoder": AudioDecoder}
+		)
+		self.ssrn_model = load_model(ssrn_model_file,
+			custom_objects={
+				"SSRN": SSRN
+			}
+		)
 		'''
 
 		# Return the function.
@@ -459,7 +475,7 @@ class GraphModel:
 		dataset = get_batch()
 
 		# Reset prev_max_attention.
-		self.prev_max_attention = tf.zeros(shape=(hp.B,), dtype=tf.int32)
+		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
 		pass
 
 
@@ -467,5 +483,5 @@ class GraphModel:
 		# Unpack dataset.
 
 		# Reset prev_max_attention.
-		self.prev_max_attention = tf.zeros(shape=(hp.B,), dtype=tf.int32)
+		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
 		pass

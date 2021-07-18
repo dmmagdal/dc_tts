@@ -24,6 +24,19 @@ class EmbeddingLayer(layers.Layer):
 		return self.embedding_table(inputs)
 
 
+	# Save any special configurations for this layer so that the model
+	# can be saved and loaded without an issue. 
+	# @param: takes no arguments.
+	# @return: returns a copy of the config object for a tensorflow/
+	#	keras layer.
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		config.update({"vocab_size": self.vocab_size,
+						"num_inputs": self.num_inputs})
+		return config
+
+
 class NormalizeLayer(layers.Layer):
 	def __init__(self, **kwargs):
 		super(NormalizeLayer, self).__init__()
@@ -51,6 +64,13 @@ class HighwayNet(layers.Layer):
 		t_outputs = self.T(inputs)
 		outputs = h_outputs * t_outputs * (1.0 - t_outputs)
 		return outputs
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		config.update({"num_units": self.num_units})
+		return config
 
 
 class Conv1DLayer(layers.Layer):
@@ -98,6 +118,21 @@ class Conv1DLayer(layers.Layer):
 		if self.activation is not None:
 			norm_output = self.act(norm_output)
 		return self.dropout(norm_output, training=training)
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		config.update({"filters": self.filters,
+						"size": self.size,
+						"rate": self.rate,
+						"padding": self.padding,
+						"dropout_rate": self.dropout_rate,
+						"use_bias": self.use_bias,
+						"activation": self.activation,
+						"pad_inputs": self.pad_inputs,
+						"pad_len": self.pad_len})
+		return config
 
 
 class HC(layers.Layer):
@@ -164,6 +199,21 @@ class HC(layers.Layer):
 		return self.dropout(dropout_input, training=training)
 
 
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		config.update({"filters": self.filters,
+						"size": self.size,
+						"rate": self.rate,
+						"padding": self.padding,
+						"dropout_rate": self.dropout_rate,
+						"use_bias": self.use_bias,
+						"activation": self.activation,
+						"pad_inputs": self.pad_inputs,
+						"pad_len": self.pad_len})
+		return config
+
+
 class Conv1DTransposeLayer(layers.Layer):
 	def __init__(self, filters=None, size=3, stride=2, padding="same", 
 			dropout_rate=0.0, use_bias=True, activation=None, **kwargs):
@@ -203,6 +253,21 @@ class Conv1DTransposeLayer(layers.Layer):
 		if self.activation is not None:
 			norm_output = self.activation(norm_output)
 		return self.dropout(norm_output, training=training)
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		config.update({"filters": self.filters,
+						"size": self.size,
+						"rate": self.rate,
+						"padding": self.padding,
+						"dropout_rate": self.dropout_rate,
+						"use_bias": self.use_bias,
+						"activation": self.activation,
+						"pad_inputs": self.pad_inputs,
+						"pad_len": self.pad_len})
+		return config
 
 
 class TextEncoder(layers.Layer):
@@ -264,14 +329,17 @@ class AudioEncoder(layers.Layer):
 	def __init__(self, hp, **kwargs):
 		super(AudioEncoder, self).__init__()
 
-		self.conv1 = Conv1DLayer(filters=hp.d, size=1, rate=1, padding="causal", 
-			dropout_rate=hp.dropout_rate, activation="relu"
+		self.hp = hp
+
+		self.conv1 = Conv1DLayer(filters=self.hp.d, size=1, rate=1, 
+			padding="causal", dropout_rate=self.hp.dropout_rate, 
+			activation="relu"
 		)
 		self.conv2 = Conv1DLayer(size=1, rate=1, padding="causal", 
-			dropout_rate=hp.dropout_rate, activation="relu"
+			dropout_rate=self.hp.dropout_rate, activation="relu"
 		)
 		self.conv3 = Conv1DLayer(size=1, rate=1, padding="causal",
-			dropout_rate=hp.dropout_rate
+			dropout_rate=self.hp.dropout_rate
 		)
 
 		self.hc1 = []
@@ -279,7 +347,7 @@ class AudioEncoder(layers.Layer):
 			for j in range(4):
 				self.hc1.append(
 					HC(size=3, rate=3 ** j, padding="causal", 
-						dropout_rate=hp.dropout_rate
+						dropout_rate=self.hp.dropout_rate
 					)
 				)
 
@@ -287,7 +355,7 @@ class AudioEncoder(layers.Layer):
 		for _ in range(2):
 			self.hc2.append(
 				HC(size=3, rate=3, padding="causal", 
-					dropout_rate=hp.dropout_rate
+					dropout_rate=self.hp.dropout_rate
 				)
 			)
 
@@ -364,7 +432,7 @@ class AudioDecoder(layers.Layer):
 
 		self.hp = hp		
 
-		self.conv1 = Conv1DLayer( filters=hp.d, size=1, rate=1, padding="causal", 
+		self.conv1 = Conv1DLayer(filters=hp.d, size=1, rate=1, padding="causal", 
 			dropout_rate=self.hp.dropout_rate
 		)
 
