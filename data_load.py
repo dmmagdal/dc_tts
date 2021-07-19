@@ -14,6 +14,7 @@ import codecs
 import re
 import os
 import unicodedata
+import gc
 
 
 def load_vocab():
@@ -106,6 +107,7 @@ def get_batch():
 		[fpaths, text_lengths, texts], shuffle=True
 	)
 	'''
+	'''
 	fpath, text_length, text = tf.data.Dataset.from_tensor_slices(
 		tuple([fpaths, text_lengths, texts])
 	).shuffle(256)
@@ -146,3 +148,68 @@ def get_batch():
 	)
 
 	return texts, mels, mags, fnames, num_batch
+	'''
+	
+	# Convert existing data to dataset.
+	dataset_1 = tf.data.Dataset.from_tensor_slices(
+		tuple([fpaths, text_lengths, texts])
+	)
+
+	# Parse "texts" column.
+	dataset_1 = dataset_1.map(
+		lambda fpath, text_length, text: (fpath, text_length, tf.io.decode_raw(text, tf.int32))
+	)
+
+	dataset_2 = dataset_1.map(
+		lambda fpath, text_length, text: tf.py_function(
+			get_spectrograms, [fpath, text_length, text], [tf.string, tf.float32, tf.float32]
+		)
+	)
+
+	dataset_3 = tf.data.Dataset.zip((dataset_1, dataset_2))
+	#dataset_3 = dataset_1.concatenate(dataset_2)
+
+	'''
+	dataset_2 = tf.data.Dataset.from_tensor_slices(
+		tuple([fnames, mels, mags])
+	)
+	'''
+
+	del dataset_1
+	del dataset_2
+	gc.collect()
+	#return dataset_1, dataset_2, dataset_3
+	return dataset_3
+
+
+def get_spectrograms(fpath, text_length, text):
+	# Extract fpath string from tensor.
+	fpath = fpath.numpy()
+
+	# Use the file path to pull mel and mag data.
+	if hp.prepro:
+		def _load_spectrograms(fpath):
+			fname = os.path.basename(fpath)
+			# Convert fname to string using decode() with utf-8 encoding.
+			#mel = "mels/{}".format(fname.replace("wav", "npy"))
+			#mag = "mags/{}".format(fname.replace("wav", "npy"))
+			mel = "mels/{}".format(fname.decode("utf-8").replace("wav", "npy"))
+			mag = "mags/{}".format(fname.decode("utf-8").replace("wav", "npy"))
+			return fname, np.load(mel), np.load(mag)
+
+		#fname, mel, mag = tf.py_function(
+		#	_load_spectrograms, [fpaths[i]], [tf.string, tf.float32, tf.float32]
+		#)
+		fname, mel, mag = _load_spectrograms(fpath)
+	else:
+		#fname, mel, mag = tf.py_function(
+		#	load_spectrograms, [fpaths[i]], [tf.string, tf.float32, tf.float32]
+		#) # (None, n_mels)
+		fname, mel, mag = load_spectrograms(fpath)
+
+	# Convert fname, mel, and mag to tensor.
+	fname = tf.convert_to_tensor(fname, dtype=tf.string)
+	mel = tf.convert_to_tensor(mel, dtype=tf.float32)
+	mag = tf.convert_to_tensor(mag, dtype=tf.float32)
+
+	return fname, mel, mag
