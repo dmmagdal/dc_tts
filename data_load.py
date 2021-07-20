@@ -91,41 +91,14 @@ def load_data(mode="train"):
 
 # Load training data and put them in queues.
 def get_batch():
-	# available_devices = tf.config.list_physical_devices()
-	# with tf.device(available_devices[-1].name):
 	# Load data.
 	fpaths, text_lengths, texts = load_data() # list
 	maxlen, minlen = max(text_lengths), min(text_lengths)
 
 	# Calculate total batch count.
 	num_batch = len(fpaths) // hp.B
-	
-	'''
-	# Convert existing data to dataset.
-	dataset_1 = tf.data.Dataset.from_tensor_slices(
-		tuple([fpaths, text_lengths, texts])
-	)
 
-	# Parse "texts" column.
-	dataset_1 = dataset_1.map(
-		lambda fpath, text_length, text: (fpath, text_length, tf.io.decode_raw(text, tf.int32))
-	)
-
-	dataset_2 = dataset_1.map(
-		lambda fpath, text_length, text: tf.py_function(
-			get_spectrograms, [fpath, text_length, text], [tf.string, tf.float32, tf.float32]
-		)
-	)
-
-	dataset_3 = tf.data.Dataset.zip((dataset_1, dataset_2))
-	#dataset_3 = dataset_1.concatenate(dataset_2)
-
-	del dataset_1
-	del dataset_2
-	gc.collect()
-	#return dataset_1, dataset_2, dataset_3
-	return dataset_3
-	'''
+	# Initialize dataset from generator.
 	dataset = tf.data.Dataset.from_generator(
 		generator, args=(fpaths, text_lengths, texts),
 		output_signature=(
@@ -135,6 +108,8 @@ def get_batch():
 			tf.TensorSpec(shape=((None, hp.n_fft // 2 + 1)), dtype=tf.float32)
 		)
 	)
+
+	# Return shuffled dataset.
 	return dataset.shuffle(256)
 
 
