@@ -99,57 +99,8 @@ def get_batch():
 
 	# Calculate total batch count.
 	num_batch = len(fpaths) // hp.B
-
-	# Create Queues.
-	'''
-	# Deprecated from TF 1.0
-	fpath, text_length, text = tf.train.slice_input_producer(
-		[fpaths, text_lengths, texts], shuffle=True
-	)
-	'''
-	'''
-	fpath, text_length, text = tf.data.Dataset.from_tensor_slices(
-		tuple([fpaths, text_lengths, texts])
-	).shuffle(256)
-
-	# Parse.
-	text = tf.io.decode_raw(text, tf.int32) # (None, )
-
-	if hp.prepro:
-		def _load_spectrograms(fpath):
-			fname = os.path.basename(fpath)
-			mel = "mels/{}".format(fname.replace("wav", "npy"))
-			mag = "mags/{}".format(fname.replace("wav", "npy"))
-			return fname, np.load(mel), np.load(mag)
-
-		fname, mel, mag = tf.py_function(
-			_load_spectrograms, [fpath], [tf.string, tf.float32, tf.float32]
-		)
-	else:
-		fname, mel, mag = tf.py_function(
-			load_spectrograms, [fpath], [tf.string, tf.float32, tf.float32]
-		) # (None, n_mels)
-
-	# Add shape information.
-	fname.set_shape(())
-	text.set_shape((None,))
-	mel.set_shape((None, hp.n_mels))
-	mag.set_shape((None, hp.n_fft // 2 + 1))
-
-	# Batching.
-	_, (texts, mels, mags, fnames) = tf.bucket_by_sequence_length(
-		input_length=text_length,
-		tensors=[text, mel, mag, fname],
-		batch_size=hp.B,
-		bucket_boundaries=[i for i in range(minlen + 1, maxlen - 1, 20)],
-		num_threads=8,
-		capacity=hp.B * 4,
-		dynamic_pad=True
-	)
-
-	return texts, mels, mags, fnames, num_batch
-	'''
 	
+	'''
 	# Convert existing data to dataset.
 	dataset_1 = tf.data.Dataset.from_tensor_slices(
 		tuple([fpaths, text_lengths, texts])
@@ -169,22 +120,27 @@ def get_batch():
 	dataset_3 = tf.data.Dataset.zip((dataset_1, dataset_2))
 	#dataset_3 = dataset_1.concatenate(dataset_2)
 
-	'''
-	dataset_2 = tf.data.Dataset.from_tensor_slices(
-		tuple([fnames, mels, mags])
-	)
-	'''
-
 	del dataset_1
 	del dataset_2
 	gc.collect()
 	#return dataset_1, dataset_2, dataset_3
 	return dataset_3
+	'''
+	dataset = tf.data.Dataset.from_generator(
+		generator, args=(fpaths, text_lengths, texts),
+		output_signature=(
+			tf.TensorSpec(shape=(()), dtype=tf.string),
+			tf.TensorSpec(shape=((None,)), dtype=tf.int32),
+			tf.TensorSpec(shape=((None, hp.n_mels)), dtype=tf.float32),
+			tf.TensorSpec(shape=((None, hp.n_fft // 2 + 1)), dtype=tf.float32)
+		)
+	)
+	return dataset.shuffle(256)
 
 
 def get_spectrograms(fpath, text_length, text):
 	# Extract fpath string from tensor.
-	fpath = fpath.numpy()
+	#fpath = fpath.numpy()
 
 	# Use the file path to pull mel and mag data.
 	if hp.prepro:
@@ -208,8 +164,17 @@ def get_spectrograms(fpath, text_length, text):
 		fname, mel, mag = load_spectrograms(fpath)
 
 	# Convert fname, mel, and mag to tensor.
-	fname = tf.convert_to_tensor(fname, dtype=tf.string)
-	mel = tf.convert_to_tensor(mel, dtype=tf.float32)
-	mag = tf.convert_to_tensor(mag, dtype=tf.float32)
+	#fname = tf.convert_to_tensor(fname, dtype=tf.string)
+	#mel = tf.convert_to_tensor(mel, dtype=tf.float32)
+	#mag = tf.convert_to_tensor(mag, dtype=tf.float32)
 
 	return fname, mel, mag
+
+
+def generator(fpaths, text_lengths, texts):
+	for i in range(len(texts)):
+		text = tf.io.decode_raw(texts[i], tf.int32)
+		fpath = fpaths[i]
+		text_length = text_lengths[i]
+		fname, mel, mag = get_spectrograms(fpath, text_length, text)
+		yield fname, text, mel, mag
