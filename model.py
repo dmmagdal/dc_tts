@@ -215,7 +215,8 @@ class Text2Mel(Model):
 		self.audioDec = AudioDecoder(self.hp)
 
 
-	def call(self, text, s, training=False):
+	def call(self, inputs, training=False):
+		text, s = inputs
 		key, value = self.textEnc(text, training=training)
 		query = self.audioEnc(s, training=training)
 		r, alignments, max_attentions = self.attention((query, key, value), 
@@ -231,11 +232,24 @@ class Text2Mel(Model):
 	def train_step(self, data):
 		# Unpack data. Structure depends on the model and on what was
 		# passed to fit().
-		text, s = data
+		fname, text, mel, mag = data
+
+		print(data)
+		print(type(data))
+		print(fname)
+		print(tf.shape(fname))
+		print(tf.shape(text))
+		print(tf.shape(mel))
+		print(tf.shape(mag))
 
 		with tf.GradientTape() as tape:
+			# Compute s.
+			s = tf.concat(
+				(tf.zeros_like(mel[:, :1, :]), mel[:, :-1, :]), 1
+			)
+
 			# Feed forward in training mode.
-			y_pred, y_pred_logits, alignments, max_attentions = self(text, s,
+			y_pred, y_pred_logits, alignments, max_attentions = self((text, s),
 				training=True
 			)
 
@@ -322,7 +336,7 @@ class GraphModel:
 		self.ssrn = SSRN(self.hp)
 
 		# Optimizer.
-		optimizer = tf.keras.optimizers.Adam(learning_rate=self.hp.lr)
+		self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.hp.lr)
 		
 		# Create and compile Text2Mel model.
 		k, v = self.textEnc(text, training=False)
@@ -335,7 +349,9 @@ class GraphModel:
 			inputs=[text, s], 
 			outputs=[y_logits, y, alignments, max_attentions], name="text2mel"
 		)
-		self.text2mel_model.compile(optimizer=optimizer, loss=self.text2mel_loss)
+		self.text2mel_model.compile(
+			optimizer=self.optimizer, loss=self.text2mel_loss
+		)
 		self.text2mel_model.summary()
 
 		# Create and compile SSRN model.
@@ -343,11 +359,18 @@ class GraphModel:
 		self.ssrn_model = tf.keras.Model(inputs=[mels], outputs=[z_logits, z], 
 			name="ssrn"
 		)
-		self.ssrn_model.compile(optimizer=optimizer, loss=self.ssrn_loss)
+		self.ssrn_model.compile(
+			optimizer=self.optimizer, loss=self.ssrn_loss
+		)
 		self.ssrn_model.summary()
 
 
 	def save_model(self, path_to_model_folder):
+		text2mel_folder = path_to_model_folder + "/text2mel"
+		ssrn_folder = path_to_model_folder + "/ssrn_model"
+
+		self.text2mel_model.save(text2mel_folder)
+		self.ssrn_model.save(ssrn_folder)
 		pass
 
 
@@ -476,7 +499,59 @@ class GraphModel:
 
 		# Reset prev_max_attention.
 		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
-		pass
+
+		# Begin custom training loop.
+		for iteration in range(self.hp.num_iterations):
+			print("\nStart of Epoch {} of {}\n".format(iteration + 1, self.hp.num_iterations))
+
+			# Iterate over batches of the dataset (batch_size = 1 for
+			# now).
+			for step, (fname, text, mel, mag) in enumerate(dataset):
+				# Compute s from mel.
+				s = tf.concat(
+					(tf.zeros_like(mel[:, :1, :]), mel[:, :-1, :]), 1
+				)
+
+				# Open a GradientTape to record the operations run
+				# during a forward pass, which enables
+				# auto-differentiation.
+				with tf.GradientTape() as tape:
+					# Run a forward pass of the text2mel model. The
+					# operations that model applies to its inputs are
+					# going to be recorded on the GradientTape.
+					y_logits, y, alignments, max_attentions = self.text2mel_model(
+						(text, mel, self.prev_max_attention, s), training=True
+					)
+
+					# Set prev_max_attention to the newly output
+					# max_attention.
+					self.prev_max_attention = max_attentions
+
+					# Compute the loss value for this minibatch.
+					loss_value = self.text2mel_loss()
+
+				# Use the gradient tape to automatically retrieve the
+				# gradients of the trainable variables with respect to
+				# the loss.
+				grads = tape.gradient(
+					loss_value, self.text2mel_model.trainable_weights
+				)
+
+				# Run one step of gradient descent by updating the
+				# value of the variables to minimize the loss.
+				self.optimizer.apply_gradients(
+					zip(grads, self.text2mel_model.trainable_weights)
+				)
+
+				# Log every 1000 batches.
+				if step % 1000 == 0:
+					print(
+						"Training loss (for one batch) at step {}: {}".format(
+							step, float(loss_value)
+						)
+					)
+
+		return
 
 
 	def inference(self, inputs, model=1):

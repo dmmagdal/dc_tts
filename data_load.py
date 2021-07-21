@@ -108,9 +108,11 @@ def get_batch():
 			tf.TensorSpec(shape=((None, hp.n_fft // 2 + 1)), dtype=tf.float32)
 		)
 	)
+	dataset = dataset.shuffle(256)
+	dataset = dataset.padded_batch(hp.B, drop_remainder=True)
 
 	# Return shuffled dataset.
-	return dataset.shuffle(256)
+	return dataset
 
 
 def get_spectrograms(fpath, text_length, text):
@@ -147,7 +149,9 @@ def get_spectrograms(fpath, text_length, text):
 
 
 def generator(fpaths, text_lengths, texts):
-	for i in range(len(texts)):
+	print(len(texts))
+	#for i in range(len(texts)):
+	for i in range(5000):
 		text = tf.io.decode_raw(texts[i], tf.int32)
 		fpath = fpaths[i]
 		text_length = text_lengths[i]
