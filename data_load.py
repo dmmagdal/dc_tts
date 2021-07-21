@@ -110,6 +110,8 @@ def get_batch():
 	)
 	dataset = dataset.shuffle(256)
 	dataset = dataset.padded_batch(hp.B, drop_remainder=True)
+	dataset = dataset.cache()
+	dataset = dataset.prefetch(64)
 
 	# Return shuffled dataset.
 	return dataset
@@ -149,9 +151,9 @@ def get_spectrograms(fpath, text_length, text):
 
 
 def generator(fpaths, text_lengths, texts):
-	print(len(texts))
+	#print(len(texts))
 	#for i in range(len(texts)):
-	for i in range(5000):
+	for i in range(len(texts) // 4):
 		text = tf.io.decode_raw(texts[i], tf.int32)
 		fpath = fpaths[i]
 		text_length = text_lengths[i]

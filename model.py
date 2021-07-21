@@ -19,6 +19,16 @@ from hyperparams import Hyperparams as hp
 from data_load import get_batch, load_vocab
 
 
+
+#'''
+# Configuration code for allowing GPU usage on Tensorflow 2. Comment
+# out when running on Tensorflow 1 on CPU.
+config = tf.compat.v1.ConfigProto()
+config.gpu_options.allow_growth=True
+session = tf.compat.v1.Session(config=config)
+#'''
+
+
 class Graph:
 	def __init__(self, num=1, mode="train"):
 		# Load vocabulary.
@@ -232,33 +242,35 @@ class Text2Mel(Model):
 	def train_step(self, data):
 		# Unpack data. Structure depends on the model and on what was
 		# passed to fit().
-		fname, text, mel, mag = data
+		fnames, texts, mels, mags = data
 
+		'''
 		print(data)
 		print(type(data))
-		print(fname)
-		print(tf.shape(fname))
-		print(tf.shape(text))
-		print(tf.shape(mel))
-		print(tf.shape(mag))
+		print(fnames)
+		print(tf.shape(fnames))
+		print(tf.shape(texts))
+		print(tf.shape(mels))
+		print(tf.shape(mags))
+		'''
 
 		with tf.GradientTape() as tape:
 			# Compute s.
 			s = tf.concat(
-				(tf.zeros_like(mel[:, :1, :]), mel[:, :-1, :]), 1
+				(tf.zeros_like(mels[:, :1, :]), mels[:, :-1, :]), 1
 			)
 
 			# Feed forward in training mode.
-			y_pred, y_pred_logits, alignments, max_attentions = self((text, s),
+			y_pred, y_pred_logits, alignments, max_attentions = self((texts, s),
 				training=True
 			)
 
 			# Mel L1 loss.
-			loss_mels = tf.reduce_mean(tf.abs(y - mels))
+			loss_mels = tf.reduce_mean(tf.abs(y_pred - mels))
 
 			# Mel binary divergence loss.
 			loss_bd1 = tf.reduce_mean(
-				tf.nn.sigmoid_cross_entropy_with_logits(logits=y_logits,
+				tf.nn.sigmoid_cross_entropy_with_logits(logits=y_pred_logits,
 					labels=mels
 				)
 			)
@@ -268,7 +280,8 @@ class Text2Mel(Model):
 				[(0, 0), (0, self.hp.max_N), (0, self.hp.max_T)], mode="CONSTANT",
 				constant_values=-1.0
 			)[:, :self.hp.max_N, :self.hp.max_T]
-			attention_masks = tf.to_float(tf.not_equal(A, -1))
+			#attention_masks = tf.to_float(tf.not_equal(A, -1))
+			attention_masks = tf.cast(tf.not_equal(A, -1), tf.float32)
 			loss_att = tf.reduce_sum(
 				tf.abs(A * self.gts) * attention_masks
 			)
@@ -286,7 +299,7 @@ class Text2Mel(Model):
 		self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
 		# Update metrics (includes the metrics that tracks the loss).
-		self.compile_metrics.update_state(mels, y_pred)
+		self.compiled_metrics.update_state(mels, y_pred)
 
 		# Return a dict mapping metric names to current value.
 		return {m.name: m.result() for m in self.metrics}
@@ -507,6 +520,8 @@ class GraphModel:
 			# Iterate over batches of the dataset (batch_size = 1 for
 			# now).
 			for step, (fname, text, mel, mag) in enumerate(dataset):
+				print(step)
+				print(mel.get_shape())
 				# Compute s from mel.
 				s = tf.concat(
 					(tf.zeros_like(mel[:, :1, :]), mel[:, :-1, :]), 1
@@ -520,7 +535,8 @@ class GraphModel:
 					# operations that model applies to its inputs are
 					# going to be recorded on the GradientTape.
 					y_logits, y, alignments, max_attentions = self.text2mel_model(
-						(text, mel, self.prev_max_attention, s), training=True
+						#(text, mel, self.prev_max_attention, s), training=True
+						(text, s), training=True
 					)
 
 					# Set prev_max_attention to the newly output

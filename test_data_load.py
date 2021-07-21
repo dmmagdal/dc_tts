@@ -22,14 +22,18 @@ for step, (fname, text, mel, mag) in enumerate(data3):
 	if step % 10 == 0 and step > 0:
 		break
 
-#exit()
+'''
 graph = GraphModel()
 graph.train_model("")
 graph.save_model(". q")
-
-
 '''
+
+
+#'''
 text2mel = Text2Mel()
-text2mel.compile(optimizer=tf.keras.optimizers.Adam(lr=hp.lr))
+text2mel.compile(
+	optimizer=tf.keras.optimizers.Adam(lr=hp.lr), metrics=["accuracy"]
+)
 text2mel.fit(data3, batch_size=hp.B, epochs=hp.num_iterations)
-'''
+text2mel.save("./text2mel_test")
+#'''
