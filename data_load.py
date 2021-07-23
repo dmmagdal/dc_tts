@@ -110,7 +110,7 @@ def get_batch():
 	)
 	dataset = dataset.shuffle(256)
 	dataset = dataset.padded_batch(hp.B, drop_remainder=True)
-	dataset = dataset.cache()
+	#dataset = dataset.cache()
 	dataset = dataset.prefetch(64)
 
 	# Return shuffled dataset.

@@ -239,20 +239,11 @@ class Text2Mel(Model):
 		return y, y_logits, alignments, max_attentions
 
 
+	@tf.function
 	def train_step(self, data):
 		# Unpack data. Structure depends on the model and on what was
 		# passed to fit().
 		fnames, texts, mels, mags = data
-
-		'''
-		print(data)
-		print(type(data))
-		print(fnames)
-		print(tf.shape(fnames))
-		print(tf.shape(texts))
-		print(tf.shape(mels))
-		print(tf.shape(mags))
-		'''
 
 		with tf.GradientTape() as tape:
 			# Compute s.
@@ -514,8 +505,11 @@ class GraphModel:
 		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
 
 		# Begin custom training loop.
-		for iteration in range(self.hp.num_iterations):
-			print("\nStart of Epoch {} of {}\n".format(iteration + 1, self.hp.num_iterations))
+		global_step = 0
+		epoch = 0
+		while global_step <= hp.num_iterations:
+			#print("\nStart of Epoch {} of {}\n".format(iteration + 1, self.hp.num_iterations))
+			print("\nStart of Epoch {}".format(epoch))
 
 			# Iterate over batches of the dataset (batch_size = 1 for
 			# now).
@@ -544,7 +538,7 @@ class GraphModel:
 					self.prev_max_attention = max_attentions
 
 					# Compute the loss value for this minibatch.
-					loss_value = self.text2mel_loss()
+					loss_value = self.text2mel_loss((text, s), mel, True)
 
 				# Use the gradient tape to automatically retrieve the
 				# gradients of the trainable variables with respect to
@@ -566,6 +560,9 @@ class GraphModel:
 							step, float(loss_value)
 						)
 					)
+
+				global_step += 1
+			epoch += 1
 
 		return
 
