@@ -325,6 +325,12 @@ class TextEncoder(layers.Layer):
 		return key, value
 
 
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		return config
+
+
 class AudioEncoder(layers.Layer):
 	def __init__(self, hp, **kwargs):
 		super(AudioEncoder, self).__init__()
@@ -376,6 +382,12 @@ class AudioEncoder(layers.Layer):
 		return hc2_output
 
 
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		return config
+
+
 class Attention(layers.Layer):
 	#def __init__(self, hp, monotonic_attention=False, prev_max_attention=None, 
 	#		**kwargs):
@@ -424,6 +436,12 @@ class Attention(layers.Layer):
 		alignments = tf.transpose(attention_output, [0, 2, 1]) # (B, N, T/r)
 
 		return result, alignments, max_attentions
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		return config
 
 
 class AudioDecoder(layers.Layer):
@@ -484,6 +502,12 @@ class AudioDecoder(layers.Layer):
 		logits = self.final_conv(conv_layer_output, training=training)
 		output = self.sigmoid(logits, training=training)
 		return logits, output
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		return config
 
 
 class SSRN(layers.Layer):
@@ -568,3 +592,9 @@ class SSRN(layers.Layer):
 		logits = self.conv4(conv_layer_output, training=training)
 		output = self.sigmoid(logits, training=training)
 		return logits, output
+
+
+	def get_config(self):
+		# Needed for saving and loading model with custom Layer.
+		config = super().get_config().copy()
+		return config

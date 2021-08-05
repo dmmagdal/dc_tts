@@ -573,3 +573,72 @@ class GraphModel:
 		# Reset prev_max_attention.
 		self.prev_max_attention = tf.zeros(shape=(self.hp.B,), dtype=tf.int32)
 		pass
+
+
+class Text2Mel2(Model):
+	def __init__(self, input_hp=None):
+		super(Text2Mel2, self).__init__()
+
+		if input_hp is not None:
+			self.hp = input_hp
+		else:
+			self.hp = hp
+
+		self.textEnc = TextEncoder(self.hp)
+		self.audioEnc = AudioEncoder(self.hp)
+		self.attention = layers.AdditiveAttention()
+		self.audioDec = AudioDecoder(self.hp)
+
+
+	def call(self, inputs, training=False):
+		text, s = inputs
+		key, value = self.textEnc(text, training=training)
+		query = self.audioEnc(s, training=training)
+		r, attention_scores = self.attention([query, key, value],
+			training=training, return_attention_scores=True
+		)
+		y_logits, y = self.audioDec(r, training=training)
+
+		return y, y_logits
+
+
+	@tf.function
+	def train_step(self, data):
+		# Unpack data. Structure depends on the model and on what was
+		# passed to fit().
+		fnames, texts, mels, mags = data
+
+		with tf.GradientTape() as tape:
+			# Compute s.
+			s = tf.concat(
+				(tf.zeros_like(mels[:, :1, :]), mels[:, :-1, :]), 1
+			)
+
+			# Feed forward in training mode.
+			y_pred, y_pred_logits, = self((texts, s), training=True)
+
+			# Mel L1 loss.
+			loss_mels = tf.reduce_mean(tf.abs(y_pred - mels))
+
+			# Mel binary divergence loss.
+			loss_bd1 = tf.reduce_mean(
+				tf.nn.sigmoid_cross_entropy_with_logits(logits=y_pred_logits,
+					labels=mels
+				)
+			)
+
+			# Total loss.
+			loss = loss_mels + loss_bd1
+
+		# Compute gradients.
+		trainable_vars = self.trainable_variables
+		gradients = tape.gradient(loss, trainable_vars)
+
+		# Update weights.
+		self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+
+		# Update metrics (includes the metrics that tracks the loss).
+		self.compiled_metrics.update_state(mels, y_pred)
+
+		# Return a dict mapping metric names to current value.
+		return {m.name: m.result() for m in self.metrics}
