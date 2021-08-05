@@ -74,7 +74,7 @@ def spectrogram2wav(mag):
 	wav = griffin_lim(mag ** hp.power)
 
 	# De-preemphasis.
-	wav = signal.ifilter([1], [1, -hp.preemphasis], wav)
+	wav = signal.lfilter([1], [1, -hp.preemphasis], wav)
 
 	# Trim.
 	wav, _ = librosa.effects.trim(wav)

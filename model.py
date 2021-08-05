@@ -11,6 +11,7 @@ import json
 import sys
 import math
 from tqdm import tqdm
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, Model
@@ -19,16 +20,16 @@ from layers import *
 from utils import *
 from hyperparams import Hyperparams as hp
 from data_load import get_batch, load_vocab
+from scipy.io.wavfile import write
 
 
-
-#'''
+'''
 # Configuration code for allowing GPU usage on Tensorflow 2. Comment
 # out when running on Tensorflow 1 on CPU.
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth=True
 session = tf.compat.v1.Session(config=config)
-#'''
+'''
 
 
 # Function that converts the number of trainingsteps or iterations to
@@ -99,9 +100,35 @@ class Graph:
 		pass
 
 
-	def inference(self, text):
-		# Unpackage the data.
-		pass
+	def inference(self, text, save_dir=None):
+		if not save_dir:
+			save_dir = self.hp.sampledir
+
+		# Initilize S/Mel tensor to all zeros.
+		y = np.zeros(
+			(len(text), self.hp.max_T, self.hp.n_mels), 
+			dtype=np.float32
+		)
+
+		# Gradually iterate through the Text2Mel model, populating the
+		# S/Mel tensor.
+		for j in tqdm(range(self.hp.max_T)):
+			y_, y_logits_ = self.text2mel_model((text, y))
+			y[:, j, :] = y_[:, j, :]
+
+		# Run the S/Mel tensor through the SSRN model.
+		z, z_logits = self.ssrn_model(y)
+		z = z.numpy()
+
+		# Generate wave files.
+		if not os.path.exists(save_dir): 
+			os.makedirs(save_dir)
+		for i, mag in enumerate(z):
+			print("Working on file", i + 1)
+			wav = spectrogram2wav(mag)
+			write(save_dir + "/{}.wav".format(i + 1), self.hp.sr, wav)
+
+		return
 
 
 	def train(self, data_batch, model=0, epochs=1, num_iterations=None):
@@ -199,10 +226,11 @@ class Graph:
 		# Save the hyperparameters.
 		hparam_path = graph_path + "hparams.json"
 		hparams = {"graph_name": self.graph_name}
-		hp_attrs = [dir(self.hp)]
+		hp_attrs = dir(self.hp)
 		for attr in hp_attrs:
 			if "__" not in attr:
-				hparams.update({attr: getattr(self.hp, attr)})
+				attr_val = getattr(self.hp, attr)
+				hparams.update({attr: attr_val})
 		with open(hparam_path, "w+") as file:
 			json.dump(hparams, file, indent=4)
 
