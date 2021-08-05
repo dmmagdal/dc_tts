@@ -260,7 +260,7 @@ class Conv1DTransposeLayer(layers.Layer):
 		config = super().get_config().copy()
 		config.update({"filters": self.filters,
 						"size": self.size,
-						"rate": self.rate,
+						"stride": self.stride,
 						"padding": self.padding,
 						"dropout_rate": self.dropout_rate,
 						"use_bias": self.use_bias,

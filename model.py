@@ -261,7 +261,8 @@ class Text2Mel(Model):
 
 			# Mel binary divergence loss.
 			loss_bd1 = tf.reduce_mean(
-				tf.nn.sigmoid_cross_entropy_with_logits(logits=y_pred_logits,
+				tf.nn.sigmoid_cross_entropy_with_logits(
+					logits=y_pred_logits,
 					labels=mels
 				)
 			)
@@ -291,6 +292,64 @@ class Text2Mel(Model):
 
 		# Update metrics (includes the metrics that tracks the loss).
 		self.compiled_metrics.update_state(mels, y_pred)
+
+		# Return a dict mapping metric names to current value.
+		return {m.name: m.result() for m in self.metrics}
+
+
+class SSRNModel(Model):
+	def __init__(self, input_hp=None):
+		super(SSRNModel, self).__init__()
+
+		if input_hp is not None:
+			self.hp = input_hp
+		else:
+			self.hp = hp
+
+		self.ssrn = SSRN(self.hp)
+
+
+	def call(self, inputs, training=False):
+		mel = inputs
+
+		z_logits, z = self.ssrn(mel, training=training)
+
+		return z, z_logits
+
+
+	@tf.function
+	def train_step(self, data):
+		# Unpack data. Structure depends on the model and on what was
+		# passed to fit().
+		fnames, texts, mels, mags = data
+
+		with tf.GradientTape() as tape:
+			# Feed forward in training mode.
+			z_pred, z_pred_logits = self(mels, training=True)
+
+			# Mag L1 loss.
+			loss_mags = tf.reduce_mean(tf.abs(z_pred - mags))
+
+			# Mag binary divergence loss.
+			loss_bd2 = tf.reduce_mean(
+				tf.nn.sigmoid_cross_entropy_with_logits(
+					logits=z_pred_logits,
+					labels=mags
+				)
+			)
+
+			# Total loss.
+			loss = loss_mags + loss_bd2
+
+		# Compute gradients.
+		trainable_vars = self.trainable_variables
+		gradients = tape.gradient(loss, trainable_vars)
+
+		# Update weights.
+		self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+
+		# Update metrics (includes the metrics that tracks the loss).
+		self.compiled_metrics.update_state(mags, z_pred)
 
 		# Return a dict mapping metric names to current value.
 		return {m.name: m.result() for m in self.metrics}
@@ -575,7 +634,7 @@ class GraphModel:
 		pass
 
 
-class Text2Mel2(Model):
+class Text2MelModel(Model):
 	def __init__(self, input_hp=None):
 		super(Text2Mel2, self).__init__()
 
@@ -622,7 +681,8 @@ class Text2Mel2(Model):
 
 			# Mel binary divergence loss.
 			loss_bd1 = tf.reduce_mean(
-				tf.nn.sigmoid_cross_entropy_with_logits(logits=y_pred_logits,
+				tf.nn.sigmoid_cross_entropy_with_logits(
+					logits=y_pred_logits,
 					labels=mels
 				)
 			)

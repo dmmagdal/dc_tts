@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 from hyperparams import Hyperparams as hp
 from data_load import *
-from model import Text2Mel, GraphModel, Text2Mel2
+from model import Text2Mel, GraphModel, Text2MelModel, SSRNModel
 
 
 gpus = tf.config.list_physical_devices("GPU")
@@ -35,13 +35,12 @@ graph.save_model("./text2mel_test")
 '''
 
 
-#'''
 early_stop = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=3)
 checkpoint = tf.keras.callbacks.ModelCheckpoint(
 	"./text2mel_test_chkpt", monitor="loss", save_best_only=True
 )
 #text2mel = Text2Mel()
-text2mel = Text2Mel2()
+text2mel = Text2MelModel()
 text2mel.compile(
 	optimizer=tf.keras.optimizers.Adam(lr=hp.lr), metrics=["accuracy"],
 )
@@ -50,7 +49,16 @@ text2mel.fit(
 	#callbacks=[early_stop, checkpoint]#epochs=1, steps_per_epoch=100#steps_per_epoch=hp.num_iterations
 )
 text2mel.save("./text2mel_test")
-#'''
+
+ssrn = SSRNModel()
+ssrn.compile(
+	optimizer=tf.keras.optimizers.Adam(lr=hp.lr), metrics=["accuracy"],
+)
+ssrn.fit(
+	data3, epochs=10#epochs=50,
+	#callbacks=[early_stop, checkpoint]#epochs=1, steps_per_epoch=100#steps_per_epoch=hp.num_iterations
+)
+ssrn.save("./ssrn_test")
 
 '''
 devices = tf.config.list_physical_devices()
