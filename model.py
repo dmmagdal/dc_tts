@@ -9,10 +9,12 @@
 import os
 import json
 import sys
+import math
 from tqdm import tqdm
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, Model
+from tensorflow.keras.models import load_model
 from layers import *
 from utils import *
 from hyperparams import Hyperparams as hp
@@ -29,181 +31,254 @@ session = tf.compat.v1.Session(config=config)
 #'''
 
 
+# Function that converts the number of trainingsteps or iterations to
+# epochs (rounded up).
+def iterations_to_epochs(num_iterations, num_batch):
+	# Formula:
+	# 1 epoch = num_batch * batch_size (1 pass through the data).
+	# 1 batch = 1 step (data of batch_size is passed through on each
+	# step).
+	# num_iterations steps * (1 batch/1 step) * (1 epoch/num_batch batch)
+	# Formula is really num_iterations/num_batch == num_epochs
+	epochs = num_iterations / num_batch
+
+	return math.ceil(epochs)
+
+
 class Graph:
-	def __init__(self, num=1, mode="train"):
+	def __init__(self, graph_name="", input_hp=None):
+		# Set graph name.
+		if graph_name == "":
+			graph_name = "graph"
+		self.graph_name = graph_name
+
+		# Set hyperparameters.
+		if input_hp:
+			self.hp = input_hp
+		else:
+			self.hp = hp
+
 		# Load vocabulary.
 		self.char2idx, self.idx2char = load_vocab()
 
-		# Set flag.
-		training = True if mode == "train" else False
+		# Initialize models.
+		self.text2mel_model = Text2MelModel(self.hp)
+		self.ssrn_model = SSRNModel(self.hp)
 
-		# Graph.
-		# Data feeding:
-		# L: Text. (B, N), int32
-		# mels: Reduced mel spectrogram. (B, T/r, n_mels), float32
-		# mags: Magnitude. (B, T, n_fft // 2 + 1), float32
-		if mode == "train":
-			self.L, self.mels, self.mags, self.fnames, self.num_batch = get_batch()
-			self.prev_max_attention = tf.ones(shape=(hp.B,), dtype=tf.int32)
-			self.gts = tf.convert_to_tensor(guided_attention())
-		else: # synthesize.
-			# self.L = tf.placeholder(tf.int32, shape=(None, None))
-			# self.mels = tf.placeholder(tf.float32, shape=(None, None, hp.n_mels))
-			# self.prev_max_attention = tf.placeholder(tf.int32, shape=(None,))
-			self.L = tf.keras.Input(shape=(None, None), dtype=tf.int32)
-			self.mels = tf.keras.Input(
-				shape=(None, None, hp.n_mels), dtype=tf.float32
-			)
-			self.prev_max_attention = tf.keras.Input(shape=(None,), dtype=tf.int32)
+		# Initialize optimizers.
+		text2mel_optimizer = keras.optimizers.Adam(lr=self.hp.lr)
+		ssrn_optimizer = keras.optimizers.Adam(lr=self.hp.lr)
 
-		if num == 1 or not training:
-			# Get S or decoder inputs. (B, T//r, n_mels)
-			self.S = tf.concat(
-				(tf.zeros_like(self.mels[:, :1, :]), self.mels[:, :-1, :]), 1
-			)
-
-			# Networks.
-			self.K, self.V = TextEncoder(hp, training=training)
-
-			self.Q = AudioEncoder(hp, training=training)
-
-			self.R, self.alignments, self.max_attentions = Attention(hp,
-				monotonic_attention=(not training), 
-				prev_max_attention=self.prev_max_attention
-			)
-
-			self.Y_logits, self.Y = AudioDecoder(hp, training=training)
-
-		else:
-			self.Z_logits, self.Z = SSRN(hp, training=training)
-
-		if not training:
-			self.Z_logits, self.Z = SSRN(hp, training=training)
-
-		self.global_step = tf.Variable(0, trainable=False)
-
-		if training:
-			if num == 1: #Text2Mel.
-				# Mel L1 loss.
-				self.loss_mels = tf.reduce_mean(tf.abs(self.Y - self.mels))
-
-				# Mel binary divergence loss.
-				self.loss_bd1 = tf.reduce_mean(
-					tf.nn.sigmoid_cross_entropy_with_logits(logits=self.Y_logits,
-						labels=self.mels
-					)
-				)
-
-				# Guided attention loss.
-				self.A = tf.pad(self.alignments, 
-					[(0, 0), (0, hp.max_N), (0, hp.max_T)], mode="CONSTANT",
-					constant_values=-1.0
-				)[:, :hp.max_N, :hp.max_T]
-				self.attention_masks = tf.to_float(tf.not_equal(self.A, -1))
-				self.loss_att = tf.reduce_sum(
-					tf.abs(self.A * self.gts) * self.attention_masks
-				)
-				self.mask_sum = tf.reduce_sum(self.attention_masks)
-				self.loss_att /= self.mask_sum
-
-				# Total loss.
-				self.loss = self.loss_mels + self.loss_bd1 + self.loss_att
-				
-			else: # SSRN.
-				# Mag L1 loss.
-				self.loss_mags = tf.reduce_mean(tf.abs(self.Z - self.mags))
-
-				# Mag binary divergence loss.
-				self.loss_bd2 = tf.reduce_mean(
-					tf.nn.sigmoid_cross_entropy_with_logits(logits=self.Z_logits),
-					labels=self.mags
-				)
-
-				# Total loss.
-				self.loss = self.loss_mags + self.loss_bd2
-
-			# Training scheme.
-			self.lr = learning_rate_decay(hp.lr, self.global_step)
-			self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
-
-			# Gradient clipping.
-			self.gvs = self.optimizer.compute_gradients(self.loss)
-			self.clipped = []
-			for grad, var in self.gvs:
-				grad = tf.clip_by_value(grad, -1.0, 1.0)
-				self.clipped.append((grad, var))
-				self.train_op = self.optimizer.apply_gradients(self.clipped,
-					global_step=self.global_step
-				)
-
-
-
-		self.textEnc = TextEncoder(hp)
-		self.audioEnc = AudioEncoder(hp)
-		self.attention = Attention(hp)
-		self.audioDec = AudioDecoder(hp)
-		self.ssrn = SSRN(hp)
-
-
-	def create_model(self):
-		# Initialize all model inputs.
-		text = tf.keras.Input(shape=(None,), dtype=tf.int32,
-			batch_size=hp
-		) # (N)
-		mels = tf.keras.Input(shape=(None, 80), dtype=tf.float32) # (T/r, n_mels)
-		pma = tf.keras.Input(shape=(), dtype=tf.int32)
-		s = tf.keras.Input(shape=(None, 80), dtype=tf.float32) # same shape as mel
-		
-		# Model layers.
-		training = False
-		self.textEnc = TextEncoder(hp)
-		self.audioEnc = AudioEncoder(hp)
-		self.attention = Attention(hp, monotonic_attention=(not training), 
-			prev_max_attention=pma
+		# Compile models.
+		self.text2mel_model.compile(
+			optimizer=text2mel_optimizer, metrics=["accuracy", "mae"]
 		)
-		self.audioDec = AudioDecoder(hp)
-		self.ssrn = SSRN(hp)
-		
-		# Create and compile Text2Mel model.
-		k, v = self.textEnc(text, training=False)
-		q = self.audioEnc(s, training=False)
-		r, alignments, max_attentions = self.attention((q, k, v), training=False)
-		y_logits, y = self.audioDec(r, training=False)
-		self.text2mel_model = tf.keras.Model(inputs=[text, s], outputs=[y_logits, y], name="text2mel")
-		self.text2mel_model.compile(optimizer="adam", loss=self.text2mel_loss)
-		self.text2mel_model.summary()
+		self.ssrn_model.compile(
+			optimizer=ssrn_optimizer, metrics=["accuracy", "mae"]
+		)
 
-		# Create and compile SSRN model.
-		z_logits, z = self.ssrn(mels, training=False)
-		self.ssrn_model = tf.keras.Model(inputs=[mels], outputs=[z_logits, z], name="ssrn")
-		self.ssrn_model.compile(optimizer="adam", loss=self.ssrn_loss)
+		# Build models (specify input shape(s)).
+		# Text2Mel input shape = [text_shape, s_shape]
+		# text_shape = (batch_size, None,)
+		# s_shape = (batch_size, None, n_mels)
+		# SSRN input_shape = mel_shape
+		# mel_shape = (batch_size, None, n_mels)
+		self.text2mel_model.build(
+			input_shape=[(None, None,), (None, None, self.hp.n_mels)]
+		)
+		self.ssrn_model.build(
+			input_shape=(None, None, self.hp.n_mels)
+		)
+
+		# Print summary of models.
+		self.text2mel_model.summary()
 		self.ssrn_model.summary()
 
 
-	def save_model(self, folder_path):
+	def call(self, inputs, training=False):
 		pass
 
 
-	def load_model(self, folder_path):
+	def inference(self, text):
+		# Unpackage the data.
 		pass
 
 
-	def text2mel_loss(self):
-		pass
+	def train(self, data_batch, model=0, epochs=1, num_iterations=None):
+		# Unpackage the data and the number of batches.
+		data, num_batch = data_batch
+
+		# Determine which model(s) to train based on the value passed
+		# in.
+		train_text2mel = True
+		train_ssrn = True
+		if model == 1:
+			train_ssrn = False
+		elif model == 2:
+			train_text2mel = False
+		elif model not in [0, 1, 2]:
+			print("Error: Select which model to train: " +\
+				"[0] Text2Mel & SSRN , [1] Text2Mel only, [2] SSRN only."
+			)
+			return
+
+		# Initialize callbacks.
+		early_stop = keras.callbacks.EarlyStopping(
+			monitor="mae", patience=3
+		)
+		text2mel_checkpoint = keras.callbacks.ModelCheckpoint(
+			"./" + self.graph_name + "/text2mel/checkpoints/text2mel_chkpt", 
+			monitor="mae", 
+			save_best_only=True
+		)
+		ssrn_checkpoint = keras.callbacks.ModelCheckpoint(
+			"./" + self.graph_name + "/ssrn/checkpoints/ssrn_chkpt", 
+			monitor="mae", 
+			save_best_only=True
+		)
+
+		# Calculate the number of epochs to train for if a value was
+		# passed in for the number of iterations.
+		if num_iterations:
+			epochs = iterations_to_epochs(num_iterations, num_batch)
+
+		# Train the model(s).
+		if train_text2mel:
+			print("Training {} Text2Mel...".format(self.graph_name))
+			self.text2mel_model.fit(
+				data,
+				epochs=epochs, 
+				callbacks=[early_stop, text2mel_checkpoint]
+			)
+			print("Finished training {} Text2Mel.".format(self.graph_name))
+		if train_ssrn:
+			print("Training {} SSRN...".format(self.graph_name))
+			self.ssrn_model.fit(
+				data,
+				epochs=epochs, 
+				callbacks=[early_stop, ssrn_checkpoint]
+			)
+			print("Finished training {} SSRN.".format(self.graph_name))
+
+		return
 
 
-	def ssrn_loss(self):
-		pass
+	def save(self, save_path=".", h5=False):
+		if h5:
+			# Check if path exists.
+			if not os.path.exists(save_path):
+				os.makedirs(save_path)
+
+			# Save path strings.
+			graph_path = self.graph_name + "/"
+			if not save_path.endswith("/"):
+				graph_path = save_path + "/" + graph_path
+			else:
+				graph_path = save_path + graph_path
+			h5_text2mel = graph_path + "text2mel/text2mel.h5"
+			h5_ssrn = graph_path + "ssrn/ssrn.h5"
+			
+
+			# Save the models.
+			self.text2mel_model.save(h5_text2mel)
+			self.ssrn_model.save(h5_ssrn)
+		else:
+			# Save path strings.
+			graph_path = self.graph_name + "/"
+			if not save_path.endswith("/"):
+				graph_path = save_path + "/" + graph_path
+			else:
+				graph_path = save_path + graph_path
+			text2mel_save = graph_path + "text2mel"
+			ssrn_save = graph_path + "ssrn"
+
+			# Save the models.
+			self.text2mel_model.save(text2mel_save)
+			self.ssrn_model.save(ssrn_save)
+
+		# Save the hyperparameters.
+		hparam_path = graph_path + "hparams.json"
+		hparams = {"graph_name": self.graph_name}
+		hp_attrs = [dir(self.hp)]
+		for attr in hp_attrs:
+			if "__" not in attr:
+				hparams.update({attr: getattr(self.hp, attr)})
+		with open(hparam_path, "w+") as file:
+			json.dump(hparams, file, indent=4)
+
+		# Print summary of models loaded.
+		self.text2mel_model.summary()
+		self.ssrn_model.summary()
+		return
 
 
-	def train_model(self, dataset_path, model=1):
-		pass
+	def load(self, save_path=".", h5=False):
+		# Save path strings.
+		graph_path = self.graph_name + "/"
+		if not save_path.endswith("/"):
+			graph_path = save_path + "/" + graph_path
+		else:
+			graph_path = save_path + graph_path
+		hparam_path = graph_path + "hparams.json"
+
+		# Check if paths exist.
+		if not os.path.exists(save_path):
+			print("Error: Could not detect path {}.".format(save_path))
+			return
+		elif not os.path.exists(graph_path):
+			print("Error: Could not detect path {}.".format(graph_path))
+			return
+		elif not os.path.exists(hparam_path):
+			print("Error: Could not detect file {}.".format(hparam_path))
+			return
+
+		if h5:
+			# Model file save paths.
+			h5_text2mel = graph_path + "text2mel/text2mel.h5"
+			h5_ssrn = graph_path + "ssrn/ssrn.h5"
+			
+			# Check if model files exist.
+			if not os.path.exists(h5_text2mel):
+				print("Error: Could not detect file {}.".format(h5_text2mel))
+				return
+			if not os.path.exists(h5_ssrn):
+				print("Error: Could not detect file {}.".format(h5_ssrn))
+				return
+
+			# Load the models.
+			self.text2mel_model = load_model(h5_text2mel)
+			self.ssrn_model = load_model(h5_ssrn)
+		else:
+			# Model file save paths.
+			text2mel_save = graph_path + "text2mel"
+			ssrn_save = graph_path + "ssrn"
+
+			# Check if model files exist.
+			if not os.path.exists(text2mel_save):
+				print("Error: Could not detect path {}.".format(text2mel_save))
+				return
+			if not os.path.exists(ssrn_save):
+				print("Error: Could not detect path {}.".format(ssrn_save))
+				return
+			
+			# Load the models.
+			self.text2mel_model = load_model(text2mel_save)
+			self.ssrn_model = load_model(ssrn_save)
+
+		# Load the hyperparameters.
+		with open(hparam_path, "r") as file:
+			hparams = json.load(file)
+		self.graph_name = hparams["graph_name"]
+		for attr in hparams:
+			if attr == "graph_name":
+				continue
+			setattr(self.hp, attr, hparams[attr])
+
+		return
 
 
-
-
-def text2mel_loss():
-	pass
+	def rename(self, new_name):
+		self.graph_name = new_name
 
 
 class Text2Mel(Model):
@@ -306,7 +381,7 @@ class SSRNModel(Model):
 		else:
 			self.hp = hp
 
-		self.ssrn = SSRN(self.hp)
+		self.ssrn = SSRN(self.hp, input_shape=(None, hp.n_mels))
 
 
 	def call(self, inputs, training=False):
@@ -375,7 +450,6 @@ class GraphModel:
 
 		# Instantiate models.
 		self.create_model()
-
 
 
 	def create_model(self):
@@ -636,14 +710,17 @@ class GraphModel:
 
 class Text2MelModel(Model):
 	def __init__(self, input_hp=None):
-		super(Text2Mel2, self).__init__()
+		super(Text2MelModel, self).__init__()
 
 		if input_hp is not None:
 			self.hp = input_hp
 		else:
 			self.hp = hp
 
-		self.textEnc = TextEncoder(self.hp)
+		# https://stackoverflow.com/questions/64455531/
+		# multi-input-modeling-with-model-sub-classing-api-in-
+		# tf-keras
+		self.textEnc = TextEncoder(self.hp, input_shape=(None,))
 		self.audioEnc = AudioEncoder(self.hp)
 		self.attention = layers.AdditiveAttention()
 		self.audioDec = AudioDecoder(self.hp)

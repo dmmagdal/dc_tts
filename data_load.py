@@ -108,13 +108,14 @@ def get_batch():
 			tf.TensorSpec(shape=((None, hp.n_fft // 2 + 1)), dtype=tf.float32)
 		)
 	)
+
 	dataset = dataset.shuffle(256)
 	dataset = dataset.padded_batch(hp.B, drop_remainder=True)
 	#dataset = dataset.cache()
 	dataset = dataset.prefetch(64)
 
 	# Return shuffled dataset.
-	return dataset
+	return dataset, num_batch
 
 
 def get_spectrograms(fpath, text_length, text):
