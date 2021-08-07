@@ -1,7 +1,8 @@
 # model.py
 # author: Diego Magdaleno
 # Convert the Graph from train.py to an OOP implementation from the
-# Tensorflow implementation of dc_tts
+# Tensorflow implementation of dc_tts.
+# Source: https://github.com/Kyubyong/dc_tts/ repo.
 # Python 3.7
 # Tensorflow 2.4.0
 
@@ -23,13 +24,13 @@ from data_load import get_batch, load_vocab
 from scipy.io.wavfile import write
 
 
-'''
+#'''
 # Configuration code for allowing GPU usage on Tensorflow 2. Comment
 # out when running on Tensorflow 1 on CPU.
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth=True
 session = tf.compat.v1.Session(config=config)
-'''
+#'''
 
 
 # Function that converts the number of trainingsteps or iterations to
@@ -150,9 +151,6 @@ class Graph:
 			return
 
 		# Initialize callbacks.
-		early_stop = keras.callbacks.EarlyStopping(
-			monitor="mae", patience=3
-		)
 		text2mel_checkpoint = keras.callbacks.ModelCheckpoint(
 			"./" + self.graph_name + "/text2mel/checkpoints/text2mel_chkpt", 
 			monitor="mae", 
@@ -163,6 +161,15 @@ class Graph:
 			monitor="mae", 
 			save_best_only=True
 		)
+		''']
+		# NOTE: Not yet ready for use.
+		text2mel_custom_chkpt = SavePoint(
+			"./" + self.graph_name + "/text2mel/checkpoints/text2mel_custom_chkpt"
+		)
+		ssrn_custom_chkpt = SavePoint(
+			"./" + self.graph_name + "/ssrn/checkpoints/ssrn_custom_chkpt"
+		)
+		'''
 
 		# Calculate the number of epochs to train for if a value was
 		# passed in for the number of iterations.
@@ -175,22 +182,38 @@ class Graph:
 			self.text2mel_model.fit(
 				data,
 				epochs=epochs, 
-				callbacks=[early_stop, text2mel_checkpoint]
+				callbacks=[text2mel_checkpoint]
 			)
+			self.save(model=1)
 			print("Finished training {} Text2Mel.".format(self.graph_name))
 		if train_ssrn:
 			print("Training {} SSRN...".format(self.graph_name))
 			self.ssrn_model.fit(
 				data,
 				epochs=epochs, 
-				callbacks=[early_stop, ssrn_checkpoint]
+				callbacks=[ssrn_checkpoint]
 			)
+			self.save(model=2)
 			print("Finished training {} SSRN.".format(self.graph_name))
 
 		return
 
 
-	def save(self, save_path=".", h5=False):
+	def save(self, save_path=".", h5=False, model=0):
+		save_t2m = True
+		save_ssrn = True
+		if model not in [0, 1, 2]:
+			print("Error: Value for argument model is invalid. "
+				"Valid argument values for model include: "
+				"[0] (Text2Mel & SSRN), [1] (Text2Mel only), or "
+				"[2] (SSRN only)."
+			)
+			return
+		elif model == 1:
+			save_ssrn = False
+		elif model == 2:
+			save_t2m = False
+
 		if h5:
 			# Check if path exists.
 			if not os.path.exists(save_path):
@@ -207,8 +230,14 @@ class Graph:
 			
 
 			# Save the models.
-			self.text2mel_model.save(h5_text2mel)
-			self.ssrn_model.save(h5_ssrn)
+			if save_t2m:
+				print("Saving {} Text2Mel...".format(self.graph_name))
+				self.text2mel_model.save(h5_text2mel)
+				print("{} SSRN Text2Mel.".format(self.graph_name))
+			if save_ssrn:
+				print("Saving {} SSRN...".format(self.graph_name))
+				self.ssrn_model.save(h5_ssrn)
+				print("{} SSRN Saved.".format(self.graph_name))
 		else:
 			# Save path strings.
 			graph_path = self.graph_name + "/"
@@ -220,8 +249,14 @@ class Graph:
 			ssrn_save = graph_path + "ssrn"
 
 			# Save the models.
-			self.text2mel_model.save(text2mel_save)
-			self.ssrn_model.save(ssrn_save)
+			if save_t2m:
+				print("Saving {} Text2Mel...".format(self.graph_name))
+				self.text2mel_model.save(text2mel_save)
+				print("{} SSRN Text2Mel.".format(self.graph_name))
+			if save_ssrn:
+				print("Saving {} SSRN...".format(self.graph_name))
+				self.ssrn_model.save(ssrn_save)
+				print("{} SSRN Saved.".format(self.graph_name))
 
 		# Save the hyperparameters.
 		hparam_path = graph_path + "hparams.json"
@@ -233,14 +268,26 @@ class Graph:
 				hparams.update({attr: attr_val})
 		with open(hparam_path, "w+") as file:
 			json.dump(hparams, file, indent=4)
+		print("{} Saved.".format(self.graph_name))
 
-		# Print summary of models loaded.
-		self.text2mel_model.summary()
-		self.ssrn_model.summary()
 		return
 
 
-	def load(self, save_path=".", h5=False):
+	def load(self, save_path=".", h5=False, model=0):
+		load_t2m = True
+		load_ssrn = True
+		if model not in [0, 1, 2]:
+			print("Error: Value for argument model is invalid. "
+				"Valid argument values for model include: "
+				"[0] (Text2Mel & SSRN), [1] (Text2Mel only), or "
+				"[2] (SSRN only)."
+			)
+			return
+		elif model == 1:
+			load_ssrn = False
+		elif model == 2:
+			load_t2m = False
+
 		# Save path strings.
 		graph_path = self.graph_name + "/"
 		if not save_path.endswith("/"):
@@ -274,8 +321,14 @@ class Graph:
 				return
 
 			# Load the models.
-			self.text2mel_model = load_model(h5_text2mel)
-			self.ssrn_model = load_model(h5_ssrn)
+			if load_t2m:
+				print("Loading {} Text2Mel...".format(self.graph_name))
+				self.text2mel_model = load_model(h5_text2mel)
+				print("{} Text2Mel Loaded.".format(self.graph_name))
+			if load_ssrn:
+				print("Loading {} SSRN...".format(self.graph_name))
+				self.ssrn_model = load_model(h5_ssrn)
+				print("{} SSRN Loaded.".format(self.graph_name))
 		else:
 			# Model file save paths.
 			text2mel_save = graph_path + "text2mel"
@@ -290,8 +343,14 @@ class Graph:
 				return
 			
 			# Load the models.
-			self.text2mel_model = load_model(text2mel_save)
-			self.ssrn_model = load_model(ssrn_save)
+			if load_t2m:
+				print("Loading {} Text2Mel...".format(self.graph_name))
+				self.text2mel_model = load_model(text2mel_save)
+				print("{} Text2Mel Loaded.".format(self.graph_name))
+			if load_ssrn:
+				print("Loading {} SSRN...".format(self.graph_name))
+				self.ssrn_model = load_model(ssrn_save)
+				print("{} SSRN Loaded.".format(self.graph_name))
 
 		# Load the hyperparameters.
 		with open(hparam_path, "r") as file:
@@ -301,6 +360,11 @@ class Graph:
 			if attr == "graph_name":
 				continue
 			setattr(self.hp, attr, hparams[attr])
+
+		# Print summary of models loaded.
+		self.text2mel_model.summary()
+		self.ssrn_model.summary()
+		print("{} Loaded.".format(self.graph_name))
 
 		return
 
@@ -807,3 +871,31 @@ class Text2MelModel(Model):
 
 		# Return a dict mapping metric names to current value.
 		return {m.name: m.result() for m in self.metrics}
+
+
+class SavePoint(keras.callbacks.Callback):
+	# Callback to allow for saving models in the middle of training as
+	# well as loading them back up to resume training from a saved
+	# point.
+	# CURRENTLY STILL WIP. DO NOT USE.
+	def __init__(self, checkpoint_path):
+		super(SavePoint, self).__init__()
+		self.checkpoint_path = checkpoint_path
+		if not self.checkpoint_path.endswith("/"):
+			self.checkpoint_path += "/"
+		os.makedirs(self.checkpoint_path, exist_ok=True)
+
+
+	def on_epoch_end(self, epoch, logs=None):
+		save_path = self.checkpoint_path + "modelcheckpoint-epoch-{}".format(epoch)
+		self.model.save(save_path)
+
+
+	def get_last_epoch(self):
+		checkpoints = os.listdir(self.checkpoint_path)
+		return len(checkpoints)
+
+
+	def get_save(self, epoch):
+		save_path = self.checkpoint_path + "modelcheckpoint-epoch-{}".format(epoch - 1)
+		return keras.models.load_model(save_path)

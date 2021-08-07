@@ -1,4 +1,9 @@
 # train.py
+# author: Diego Magdaleno
+# Instantiate and train a Graph object from model.py. Trains both the
+# Text2Mel and SSRN models in the Graph.
+# Python 3.7
+# Tensorflow 2.4.0
 
 
 import math
@@ -9,7 +14,7 @@ from hyperparams import Hyperparams as hp
 from layers import *
 from utils import *
 from data_load import load_vocab, get_batch, load_data
-from model import Text2MelModel, SSRNModel, Graph
+from model import Text2MelModel, SSRNModel, Graph, SavePoint
 from datetime import datetime
 
 
@@ -33,11 +38,14 @@ data, num_batch = get_batch()
 # Initialize model callbacks.
 early_stop = tf.keras.callbacks.EarlyStopping(monitor="mae", patience=3)
 text2mel_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-	"./tmp/text2mel_test_chkpt", monitor="mae", save_best_only=True
+	"./tmp/text2mel_test_chkpt", monitor="mae", save_best_only=True,
+	save_freq="epoch"
 )
 ssrn_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-	"./tmp/ssrn_test_chkpt", monitor="mae", save_best_only=True
+	"./tmp/ssrn_test_chkpt", monitor="mae", save_best_only=True,
+	save_freq="epoch"
 )
+#text2mel_savepoint = SavePoint("./tmp/text2mel_custom_savepoint")
 
 # DC_TTS paper shows model was trained on the following number of
 # iterations:
@@ -48,6 +56,7 @@ ssrn_checkpoint = tf.keras.callbacks.ModelCheckpoint(
 num_iterations = 20000
 num_iterations = 340000
 epochs = iterations_to_epochs(num_iterations, num_batch)
+#epochs = 10
 
 '''
 # Initialize and compile models.
@@ -78,7 +87,7 @@ ssrn.summary()
 start = datetime.now()
 text2mel.fit(
 	data, epochs=epochs,
-	callbacks=[early_stop, text2mel_checkpoint]
+	callbacks=[early_stop, text2mel_checkpoint],
 )
 text2mel.save("./text2mel_test")
 print("Time to train Text2Mel {}".format(datetime.now() - start))
@@ -92,7 +101,7 @@ print("Time to train SSRN {}".format(datetime.now() - start2))
 print("Time to train all models {}".format(datetime.now() - start))
 '''
 
-
+#'''
 # Initialize a graph object that contains both the Text2Mel and SSRN
 # models for streamlined training and inference.
 graph = Graph("dc_tts_graph")
@@ -102,5 +111,8 @@ graph.train((data, num_batch), num_iterations=num_iterations)
 graph.save()
 graph.load()
 
+# Pull texts from the harvard sentences text file and synthesize on
+# those texts.
 text = load_data("synthesize")
 graph.inference(text)
+#'''

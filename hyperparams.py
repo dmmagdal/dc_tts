@@ -2,6 +2,7 @@
 # author: Diego Magdaleno
 # Copy of the hyperparams.py file in the Tensorflow implementation of
 # dc_tts.
+# Source: https://github.com/Kyubyong/dc_tts/ repo.
 # Python 3.7
 # Tensorflow 2.4.0
 

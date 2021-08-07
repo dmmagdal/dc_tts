@@ -2,6 +2,7 @@
 # author: Diego Magdaleno
 # OOP implementation of the modules.py and networks.py files in the
 # Tensorflow implementation of dc_tts.
+# Source: https://github.com/Kyubyong/dc_tts/ repo.
 # Python 3.7
 # Tensorflow 2.4.0
 

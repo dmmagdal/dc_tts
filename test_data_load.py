@@ -1,4 +1,8 @@
 # test_data_load.py
+# author: Diego Magdaleno
+# Test file for loading data and initializing, building, compiling, 
+# training, and saving the Text2Mel and SSRN models.
+# Python 3.7
 
 
 import numpy as np

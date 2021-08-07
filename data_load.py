@@ -2,6 +2,7 @@
 # author: Diego Magdaleno
 # Copy of the data_load.py file in the Tensorflow implementation of
 # dc_tts.
+# Source: https://github.com/Kyubyong/dc_tts/ repo.
 # Python 3.7
 # Tensorflow 2.4.0
 
@@ -153,8 +154,8 @@ def get_spectrograms(fpath, text_length, text):
 
 def generator(fpaths, text_lengths, texts):
 	#print(len(texts))
-	#for i in range(len(texts)):
-	for i in range(len(texts) // 4):
+	for i in range(len(texts)):
+	#for i in range(len(texts) // 4):
 		text = tf.io.decode_raw(texts[i], tf.int32)
 		fpath = fpaths[i]
 		text_length = text_lengths[i]
