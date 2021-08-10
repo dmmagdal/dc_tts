@@ -14,7 +14,7 @@ from hyperparams import Hyperparams as hp
 from layers import *
 from utils import *
 from data_load import load_vocab, get_batch, load_data
-from model import Text2MelModel, SSRNModel, Graph, SavePoint
+from model import Text2MelModel, SSRNModel, Graph, SavePoint, TTSGraph
 from datetime import datetime
 
 
@@ -104,11 +104,14 @@ print("Time to train all models {}".format(datetime.now() - start))
 #'''
 # Initialize a graph object that contains both the Text2Mel and SSRN
 # models for streamlined training and inference.
-graph = Graph("dc_tts_graph")
+graph = TTSGraph("original_dc_tts_graph")
+#graph = Graph("dc_tts_graph")
 #graph = Graph()
 #graph.train((data, num_batch))
+'''
 graph.train((data, num_batch), num_iterations=num_iterations)
 graph.save()
+'''
 graph.load()
 
 # Pull texts from the harvard sentences text file and synthesize on

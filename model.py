@@ -386,7 +386,7 @@ class Text2Mel(Model):
 
 		self.gts = tf.convert_to_tensor(guided_attention())
 
-		self.textEnc = TextEncoder(self.hp)
+		self.textEnc = TextEncoder(self.hp, input_shape=(None,))
 		self.audioEnc = AudioEncoder(self.hp)
 		self.attention = Attention(self.hp)
 		self.audioDec = AudioDecoder(self.hp)
@@ -694,7 +694,7 @@ class GraphModel:
 	def ssrn_loss(self, inputs, outputs, training):
 		mels = inputs
 		mags = outputs
-		z_logits, z = sef.ssrn_model(mels, training=training)
+		z_logits, z = self.ssrn_model(mels, training=training)
 
 		# Mag L1 loss.
 		loss_mags = tf.reduce_mean(tf.abs(z - mags))
@@ -899,3 +899,289 @@ class SavePoint(keras.callbacks.Callback):
 	def get_save(self, epoch):
 		save_path = self.checkpoint_path + "modelcheckpoint-epoch-{}".format(epoch - 1)
 		return keras.models.load_model(save_path)
+
+
+class TTSGraph:
+	def __init__(self, graph_name="", input_hp=None):
+		# Set graph name.
+		if graph_name == "":
+			graph_name = "graph"
+		self.graph_name = graph_name
+
+		# Set hyperparameters.
+		if input_hp:
+			self.hp = input_hp
+		else:
+			self.hp = hp
+
+		# Load vocabulary.
+		self.char2idx, self.idx2char = load_vocab()
+
+		# Initialize models.
+		self.text2mel_model = Text2Mel(self.hp)
+		self.ssrn_model = SSRNModel(self.hp)
+
+		# Initialize optimizers.
+		text2mel_optimizer = keras.optimizers.Adam(lr=self.hp.lr)
+		ssrn_optimizer = keras.optimizers.Adam(lr=self.hp.lr)
+
+		# Compile models.
+		self.text2mel_model.compile(
+			optimizer=text2mel_optimizer, metrics=["accuracy", "mae"]
+		)
+		self.ssrn_model.compile(
+			optimizer=ssrn_optimizer, metrics=["accuracy", "mae"]
+		)
+
+		# Build models (specify input shape(s)).
+		# Text2Mel input shape = [text_shape, s_shape]
+		# text_shape = (batch_size, None,)
+		# s_shape = (batch_size, None, n_mels)
+		# SSRN input_shape = mel_shape
+		# mel_shape = (batch_size, None, n_mels)
+		self.text2mel_model.build(
+			input_shape=[(None, None,), (None, None, self.hp.n_mels)]
+		)
+		self.ssrn_model.build(
+			input_shape=(None, None, self.hp.n_mels)
+		)
+
+		# Print summary of models.
+		self.text2mel_model.summary()
+		self.ssrn_model.summary()
+
+
+	def call(self, inputs, training=False):
+		pass
+
+
+	def inference(self, text, save_dir=None):
+		if not save_dir:
+			save_dir = self.hp.sampledir
+
+		# Initilize S/Mel tensor to all zeros.
+		y = np.zeros(
+			(len(text), self.hp.max_T, self.hp.n_mels), 
+			dtype=np.float32
+		)
+		prev_max_attention = np.zeros((len(text),), np.int32)
+
+		# Gradually iterate through the Text2Mel model, populating the
+		# S/Mel tensor.
+		for j in tqdm(range(self.hp.max_T)):
+			y_, y_logits_, alignments, max_attentions = self.text2mel_model((text, y))
+			y[:, j, :] = y_[:, j, :]
+			prev_max_attention = max_attentions[:, j]
+
+		# Run the S/Mel tensor through the SSRN model.
+		z, z_logits = self.ssrn_model(y)
+		z = z.numpy()
+
+		# Generate wave files.
+		if not os.path.exists(save_dir): 
+			os.makedirs(save_dir)
+		for i, mag in enumerate(z):
+			print("Working on file", i + 1)
+			wav = spectrogram2wav(mag)
+			write(save_dir + "/{}.wav".format(i + 1), self.hp.sr, wav)
+
+		return
+
+
+	def train(self, data_batch, model=0, epochs=1, num_iterations=None):
+		# Unpackage the data and the number of batches.
+		data, num_batch = data_batch
+
+		# Determine which model(s) to train based on the value passed
+		# in.
+		train_text2mel = True
+		train_ssrn = True
+		if model == 1:
+			train_ssrn = False
+		elif model == 2:
+			train_text2mel = False
+		elif model not in [0, 1, 2]:
+			print("Error: Select which model to train: " +\
+				"[0] Text2Mel & SSRN , [1] Text2Mel only, [2] SSRN only."
+			)
+			return
+
+		# Initialize callbacks.
+		text2mel_checkpoint = keras.callbacks.ModelCheckpoint(
+			"./" + self.graph_name + "/text2mel/checkpoints/text2mel_chkpt", 
+			monitor="mae", 
+			save_best_only=True
+		)
+		ssrn_checkpoint = keras.callbacks.ModelCheckpoint(
+			"./" + self.graph_name + "/ssrn/checkpoints/ssrn_chkpt", 
+			monitor="mae", 
+			save_best_only=True
+		)
+		''']
+		# NOTE: Not yet ready for use.
+		text2mel_custom_chkpt = SavePoint(
+			"./" + self.graph_name + "/text2mel/checkpoints/text2mel_custom_chkpt"
+		)
+		ssrn_custom_chkpt = SavePoint(
+			"./" + self.graph_name + "/ssrn/checkpoints/ssrn_custom_chkpt"
+		)
+		'''
+
+		# Calculate the number of epochs to train for if a value was
+		# passed in for the number of iterations.
+		if num_iterations:
+			epochs = iterations_to_epochs(num_iterations, num_batch)
+
+		# Train the model(s).
+		if train_text2mel:
+			print("Training {} Text2Mel...".format(self.graph_name))
+			self.text2mel_model.fit(
+				data,
+				epochs=epochs, 
+				callbacks=[text2mel_checkpoint]
+			)
+			self.save(model=1)
+			print("Finished training {} Text2Mel.".format(self.graph_name))
+		if train_ssrn:
+			print("Training {} SSRN...".format(self.graph_name))
+			self.ssrn_model.fit(
+				data,
+				epochs=epochs, 
+				callbacks=[ssrn_checkpoint]
+			)
+			self.save(model=2)
+			print("Finished training {} SSRN.".format(self.graph_name))
+
+		return
+
+
+	def save(self, save_path=".", model=0):
+		save_t2m = True
+		save_ssrn = True
+		if model not in [0, 1, 2]:
+			print("Error: Value for argument model is invalid. "
+				"Valid argument values for model include: "
+				"[0] (Text2Mel & SSRN), [1] (Text2Mel only), or "
+				"[2] (SSRN only)."
+			)
+			return
+		elif model == 1:
+			save_ssrn = False
+		elif model == 2:
+			save_t2m = False
+
+		# Check if path exists.
+		if not os.path.exists(save_path):
+			os.makedirs(save_path, exist_ok=True)
+
+		# Save path strings.
+		graph_path = self.graph_name + "/"
+		if not save_path.endswith("/"):
+			graph_path = save_path + "/" + graph_path
+		else:
+			graph_path = save_path + graph_path
+		os.makedirs(graph_path + "text2mel", exist_ok=True)
+		os.makedirs(graph_path + "ssrn", exist_ok=True)
+		h5_text2mel = graph_path + "text2mel/text2mel.h5"
+		h5_ssrn = graph_path + "ssrn/ssrn.h5"
+
+		# Save the models.
+		if save_t2m:
+			print("Saving {} Text2Mel...".format(self.graph_name))
+			self.text2mel_model.save_weights(h5_text2mel, save_format="h5")
+			print("{} SSRN Text2Mel.".format(self.graph_name))
+		if save_ssrn:
+			print("Saving {} SSRN...".format(self.graph_name))
+			self.ssrn_model.save_weights(h5_ssrn, save_format="h5")
+			print("{} SSRN Saved.".format(self.graph_name))
+
+		# Save the hyperparameters.
+		hparam_path = graph_path + "hparams.json"
+		hparams = {"graph_name": self.graph_name}
+		hp_attrs = dir(self.hp)
+		for attr in hp_attrs:
+			if "__" not in attr:
+				attr_val = getattr(self.hp, attr)
+				hparams.update({attr: attr_val})
+		with open(hparam_path, "w+") as file:
+			json.dump(hparams, file, indent=4)
+		print("{} Saved.".format(self.graph_name))
+
+		return
+
+
+	def load(self, save_path=".", model=0):
+		load_t2m = True
+		load_ssrn = True
+		if model not in [0, 1, 2]:
+			print("Error: Value for argument model is invalid. "
+				"Valid argument values for model include: "
+				"[0] (Text2Mel & SSRN), [1] (Text2Mel only), or "
+				"[2] (SSRN only)."
+			)
+			return
+		elif model == 1:
+			load_ssrn = False
+		elif model == 2:
+			load_t2m = False
+
+		# Save path strings.
+		graph_path = self.graph_name + "/"
+		if not save_path.endswith("/"):
+			graph_path = save_path + "/" + graph_path
+		else:
+			graph_path = save_path + graph_path
+		hparam_path = graph_path + "hparams.json"
+
+		# Check if paths exist.
+		if not os.path.exists(save_path):
+			print("Error: Could not detect path {}.".format(save_path))
+			return
+		elif not os.path.exists(graph_path):
+			print("Error: Could not detect path {}.".format(graph_path))
+			return
+		elif not os.path.exists(hparam_path):
+			print("Error: Could not detect file {}.".format(hparam_path))
+			return
+
+		# Model file save paths.
+		h5_text2mel = graph_path + "text2mel/text2mel.h5"
+		h5_ssrn = graph_path + "ssrn/ssrn.h5"
+		
+		# Check if model files exist.
+		if not os.path.exists(h5_text2mel):
+			print("Error: Could not detect file {}.".format(h5_text2mel))
+			return
+		if not os.path.exists(h5_ssrn):
+			print("Error: Could not detect file {}.".format(h5_ssrn))
+			return
+
+		# Load the models.
+		if load_t2m:
+			print("Loading {} Text2Mel...".format(self.graph_name))
+			self.text2mel_model.load_weights(h5_text2mel)
+			print("{} Text2Mel Loaded.".format(self.graph_name))
+		if load_ssrn:
+			print("Loading {} SSRN...".format(self.graph_name))
+			self.ssrn_model.load_weights(h5_ssrn)
+			print("{} SSRN Loaded.".format(self.graph_name))
+
+		# Load the hyperparameters.
+		with open(hparam_path, "r") as file:
+			hparams = json.load(file)
+		self.graph_name = hparams["graph_name"]
+		for attr in hparams:
+			if attr == "graph_name":
+				continue
+			setattr(self.hp, attr, hparams[attr])
+
+		# Print summary of models loaded.
+		self.text2mel_model.summary()
+		self.ssrn_model.summary()
+		print("{} Loaded.".format(self.graph_name))
+
+		return
+
+
+	def rename(self, new_name):
+		self.graph_name = new_name
