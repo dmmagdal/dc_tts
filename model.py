@@ -965,6 +965,7 @@ class TTSGraph:
 			dtype=np.float32
 		)
 		prev_max_attention = np.zeros((len(text),), np.int32)
+		self.text2mel_model.prev_max_attention = prev_max_attention
 
 		# Gradually iterate through the Text2Mel model, populating the
 		# S/Mel tensor.
@@ -972,6 +973,7 @@ class TTSGraph:
 			y_, y_logits_, alignments, max_attentions = self.text2mel_model((text, y))
 			y[:, j, :] = y_[:, j, :]
 			prev_max_attention = max_attentions[:, j]
+			self.text2mel_model.prev_max_attention = prev_max_attention
 
 		# Run the S/Mel tensor through the SSRN model.
 		z, z_logits = self.ssrn_model(y)
