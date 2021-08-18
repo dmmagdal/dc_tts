@@ -108,11 +108,10 @@ graph = TTSGraph("original_dc_tts_graph")
 #graph = Graph("dc_tts_graph")
 #graph = Graph()
 #graph.train((data, num_batch))
-'''
+
+graph.load()
 graph.train((data, num_batch), num_iterations=num_iterations)
 graph.save()
-'''
-graph.load()
 
 # Pull texts from the harvard sentences text file and synthesize on
 # those texts.
