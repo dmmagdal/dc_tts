@@ -116,7 +116,8 @@ def invert_spectrogram(spectrogram):
 # @param: dir, output path.
 def plot_alignment(alignment, gs, dir=hp.logdir):
 	if not os.path.exists(dir):
-		os.mkdir(dir)
+		#os.mkdir(dir)
+		os.makedirs(dir)
 
 	fig, ax = plt.subplots()
 	im = ax.imshow(alignment)

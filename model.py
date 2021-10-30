@@ -974,6 +974,7 @@ class TTSGraph:
 			y[:, j, :] = y_[:, j, :]
 			prev_max_attention = max_attentions[:, j]
 			self.text2mel_model.prev_max_attention = prev_max_attention
+			plot_alignment(alignments[-1], j)
 
 		# Run the S/Mel tensor through the SSRN model.
 		z, z_logits = self.ssrn_model(y)
@@ -1187,3 +1188,9 @@ class TTSGraph:
 
 	def rename(self, new_name):
 		self.graph_name = new_name
+
+
+class GraphAttention(keras.callbacks.Callback):
+	def on_train_batch_end(self, batch, logs=None):
+		#self.model.
+		pass
